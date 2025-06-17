@@ -5,6 +5,8 @@ An automated job application system that helps you find and apply for remote job
 ## Features
 
 - User authentication with Supabase
+  - Email/Password login
+  - Google OAuth login
 - Job scraping from multiple sources:
   - WeWorkRemotely
   - RemoteOK
@@ -30,6 +32,8 @@ npm install
 ```env
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
 ```
 
 4. Set up your Supabase project:
@@ -37,14 +41,29 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
    - Enable email authentication in the Auth settings
    - Run the SQL commands from `supabase/schema.sql` in the SQL editor
 
-5. Start the development server:
+5. Set up Google OAuth:
+   - Go to [Google Cloud Console](https://console.cloud.google.com)
+   - Create a new project or select an existing one
+   - Enable the Google OAuth API
+   - Create OAuth 2.0 credentials:
+     - Application type: Web application
+     - Add authorized redirect URIs:
+       - `https://[YOUR_SUPABASE_PROJECT_REF].supabase.co/auth/v1/callback`
+       - `http://localhost:3000/auth/callback` (for development)
+   - Copy the Client ID and Client Secret to your `.env` file
+   - In Supabase Dashboard:
+     - Go to Authentication > Providers
+     - Enable Google provider
+     - Add your Google Client ID and Secret
+
+6. Start the development server:
 ```bash
 npm run dev
 ```
 
 ## Usage
 
-1. Sign up for an account
+1. Sign up for an account (via email or Google)
 2. Set up your profile:
    - Add search keywords (e.g., "react", "typescript")
    - Add preferred job types (e.g., "full-time", "contract")
@@ -77,7 +96,9 @@ src/
 
 ### Authentication Flow
 
-1. Users sign up/log in using email and password
+1. Users can sign up/log in using:
+   - Email and password
+   - Google OAuth
 2. Supabase handles authentication and session management
 3. A profile is automatically created for new users
 4. All API routes and data access are protected by Row Level Security

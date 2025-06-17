@@ -1,129 +1,92 @@
 import { NextResponse } from 'next/server';
-import { getAdminClient } from '@/lib/supabaseClient';
 import { createClient } from '@supabase/supabase-js';
 
-async function getSession(request: Request) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    }
-  );
-
-  // Get the JWT from the Authorization header
-  const authHeader = request.headers.get('Authorization');
-  if (!authHeader) {
-    return null;
-  }
-
-  // Set the access token
-  supabase.auth.setSession({
-    access_token: authHeader.replace('Bearer ', ''),
-    refresh_token: '',
-  });
-
-  const { data: { user } } = await supabase.auth.getUser();
-  return user ? { user } : null;
-}
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export async function POST(request: Request) {
   try {
-    const session = await getSession(request);
-    if (!session) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
+    const { sessionId, jobId } = await request.json();
 
-    const { jobId } = await request.json();
-    if (!jobId) {
+    if (!sessionId || !jobId) {
       return NextResponse.json(
-        { error: 'Job ID is required' },
+        { error: 'Missing required data' },
         { status: 400 }
       );
     }
 
-    const supabase = getAdminClient();
+    // Start a transaction
+    const { data: session, error: sessionError } = await supabase
+      .from('guest_sessions')
+      .select('applications_remaining, resume_data')
+      .eq('session_id', sessionId)
+      .single();
 
-    // Get the job details
+    if (sessionError || !session) {
+      return NextResponse.json(
+        { error: 'Invalid session' },
+        { status: 400 }
+      );
+    }
+
+    if (session.applications_remaining <= 0) {
+      return NextResponse.json(
+        { error: 'No applications remaining' },
+        { status: 400 }
+      );
+    }
+
+    // Get job details
     const { data: job, error: jobError } = await supabase
       .from('jobs')
       .select('*')
       .eq('id', jobId)
-      .eq('user_id', session.user.id)
       .single();
 
-    if (jobError) {
-      throw jobError;
-    }
-
-    if (!job) {
+    if (jobError || !job) {
       return NextResponse.json(
         { error: 'Job not found' },
         { status: 404 }
       );
     }
 
-    if (job.applied) {
-      return NextResponse.json(
-        { error: 'Already applied to this job' },
-        { status: 400 }
-      );
-    }
-
-    // Get user profile
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', session.user.id)
-      .single();
-
-    if (profileError) {
-      throw profileError;
-    }
-
-    if (!profile?.resume_url) {
-      return NextResponse.json(
-        { error: 'Please upload your resume before applying' },
-        { status: 400 }
-      );
-    }
-
-    // Mark job as applied
-    const { error: updateError } = await supabase
-      .from('jobs')
-      .update({
-        applied: true,
+    // Record the application
+    const { error: applicationError } = await supabase
+      .from('job_applications')
+      .insert({
+        job_id: jobId,
+        session_id: sessionId,
+        resume_data: session.resume_data,
+        status: 'submitted',
         applied_at: new Date().toISOString()
+      });
+
+    if (applicationError) {
+      throw applicationError;
+    }
+
+    // Decrement applications remaining
+    const { error: updateError } = await supabase
+      .from('guest_sessions')
+      .update({ 
+        applications_remaining: session.applications_remaining - 1 
       })
-      .eq('id', jobId)
-      .eq('user_id', session.user.id);
+      .eq('session_id', sessionId);
 
     if (updateError) {
       throw updateError;
     }
 
-    // TODO: Implement actual job application logic here
-    // This could involve:
-    // 1. Sending an email with the resume
-    // 2. Making an API call to the job board
-    // 3. Filling out a form on the company's website
-    // For now, we'll just return the apply URL if available
-
     return NextResponse.json({
-      message: 'Application marked as sent',
-      apply_url: job.apply_url
+      message: 'Application submitted successfully',
+      applications_remaining: session.applications_remaining - 1
     });
-
   } catch (error) {
-    console.error('Error applying to job:', error);
+    console.error('Error submitting application:', error);
     return NextResponse.json(
-      { error: 'Failed to apply to job' },
+      { error: 'Failed to submit application' },
       { status: 500 }
     );
   }

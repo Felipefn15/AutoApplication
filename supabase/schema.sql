@@ -149,4 +149,78 @@ $$;
 -- Create a trigger to create a profile when a new user signs up
 CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
-    FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user(); 
+    FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+-- Create guest_sessions table
+CREATE TABLE guest_sessions (
+  id uuid default uuid_generate_v4() primary key,
+  session_id text not null unique,
+  resume_data jsonb not null,
+  applications_remaining integer not null default 20,
+  created_at timestamp with time zone not null default now(),
+  updated_at timestamp with time zone not null default now()
+);
+
+-- Create job_applications table
+CREATE TABLE job_applications (
+  id uuid default uuid_generate_v4() primary key,
+  job_id uuid references jobs(id) on delete cascade,
+  session_id text references guest_sessions(session_id) on delete cascade,
+  resume_data jsonb not null,
+  status text not null default 'submitted',
+  applied_at timestamp with time zone not null default now(),
+  created_at timestamp with time zone not null default now(),
+  updated_at timestamp with time zone not null default now()
+);
+
+-- Add indexes for better query performance
+CREATE INDEX idx_guest_sessions_session_id ON guest_sessions(session_id);
+CREATE INDEX idx_job_applications_session_id ON job_applications(session_id);
+CREATE INDEX idx_job_applications_job_id ON job_applications(job_id);
+
+-- Add RLS policies for guest_sessions
+ALTER TABLE guest_sessions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Guest sessions are viewable by anyone"
+  ON guest_sessions FOR SELECT
+  USING (true);
+
+CREATE POLICY "Guest sessions are insertable by anyone"
+  ON guest_sessions FOR INSERT
+  WITH CHECK (true);
+
+CREATE POLICY "Guest sessions are updatable by session owner"
+  ON guest_sessions FOR UPDATE
+  USING (true)
+  WITH CHECK (true);
+
+-- Add RLS policies for job_applications
+ALTER TABLE job_applications ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Job applications are viewable by session owner"
+  ON job_applications FOR SELECT
+  USING (true);
+
+CREATE POLICY "Job applications are insertable by session owner"
+  ON job_applications FOR INSERT
+  WITH CHECK (true);
+
+-- Add function to update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Add triggers to update updated_at
+CREATE TRIGGER update_guest_sessions_updated_at
+  BEFORE UPDATE ON guest_sessions
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_job_applications_updated_at
+  BEFORE UPDATE ON job_applications
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column(); 

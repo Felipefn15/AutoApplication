@@ -1,0 +1,50 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Project: Auto Job Application Agent
+# Goal: Automate search + application for remote jobs using Next.js + Supabase + Groq LLM + web scraping
+
+priorities:
+  - Implement Next.js API Routes first for backend logic
+  - Set up Supabase client + DB schema early to unblock API development
+  - Write /api/jobs/scrape.ts before frontend — core job search logic must be stable
+  - Ensure Groq LLM integration + scraping tested before connecting to UI
+  - Develop frontend job list page after /api/jobs/scrape.ts works
+  - Build profile management UI (upload + preferences) after job list
+  - Write /api/jobs/apply.ts logic (auto-apply email + open site link)
+  - Add filters + pagination as last frontend step
+
+rules:
+  - Use TypeScript everywhere
+  - Comment key logic in API routes (scraping, Groq calls, email sending)
+  - Prefer serverless-compatible scraping libs (Cheerio, Playwright headless)
+  - Keep env variables (Groq key, Supabase URL, DB key) in .env.local — never hard-code
+  - Limit resume upload size to 5MB
+  - Maintain clean, modular code (lib/ directory for clients: supabaseClient.ts, groqClient.ts, scraper.ts)
+
+file_structure:
+  - /pages
+    - /jobs/index.tsx
+    - /profile/index.tsx
+    - /api/jobs/scrape.ts
+    - /api/jobs/apply.ts
+    - /api/profile/update.ts
+  - /lib
+    - supabaseClient.ts
+    - groqClient.ts
+    - scraper.ts
+  - README.md
+  - .env.example
+
+output_requirements:
+  - Generate clean code blocks — no placeholder text like "TODO"
+  - Include Supabase SQL for table creation (vagas + usuarios)
+  - Provide Groq prompt template in /lib/groqClient.ts
+  - Add comments explaining data flow in /api/jobs/scrape.ts
+  - Ensure deploy-ready (Vercel) — no custom server code
+
+testing:
+  - Prefer mocked Groq/scraper calls during initial development
+  - Provide example data for UI components (mocked job list)

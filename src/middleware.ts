@@ -1,63 +1,40 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
-import { NextResponse, type NextRequest } from 'next/server'
+import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs';
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 
 export async function middleware(request: NextRequest) {
-  const response = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
-  })
+  const res = NextResponse.next();
+  const supabase = createMiddlewareClient({ req: request, res });
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          return request.cookies.get(name)?.value
-        },
-        set(name: string, value: string, options: CookieOptions) {
-          response.cookies.set({
-            name,
-            value,
-            ...options,
-          })
-        },
-        remove(name: string, options: CookieOptions) {
-          response.cookies.set({
-            name,
-            value: '',
-            ...options,
-          })
-        },
-      },
-    }
-  )
+  // Check if the path is public
+  const isPublicPath =
+    request.nextUrl.pathname.startsWith('/auth') ||
+    request.nextUrl.pathname.startsWith('/guest') ||
+    request.nextUrl.pathname === '/';
 
-  const { data: { session } } = await supabase.auth.getSession()
-
-  // If there's no session and the user is trying to access protected routes
-  if (!session && !request.nextUrl.pathname.startsWith('/auth')) {
-    const redirectUrl = request.nextUrl.clone()
-    redirectUrl.pathname = '/auth/login'
-    redirectUrl.searchParams.set('redirectedFrom', request.nextUrl.pathname)
-    return NextResponse.redirect(redirectUrl)
+  if (isPublicPath) {
+    return res;
   }
 
-  // If there's a session and the user is on auth pages
-  if (session && request.nextUrl.pathname.startsWith('/auth')) {
-    const redirectUrl = request.nextUrl.clone()
-    redirectUrl.pathname = '/jobs'
-    return NextResponse.redirect(redirectUrl)
+  // Check if we have a session
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  // If there's no session and the path is not public, redirect to login
+  if (!session && !isPublicPath) {
+    const redirectUrl = new URL('/auth/login', request.url);
+    redirectUrl.searchParams.set('redirectedFrom', request.nextUrl.pathname);
+    return NextResponse.redirect(redirectUrl);
   }
 
-  return response
+  return res;
 }
 
 export const config = {
   matcher: [
     /*
-     * Match all request paths except:
+     * Match all request paths except for the ones starting with:
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
@@ -65,4 +42,4 @@ export const config = {
      */
     '/((?!_next/static|_next/image|favicon.ico|public/).*)',
   ],
-} 
+}; 
