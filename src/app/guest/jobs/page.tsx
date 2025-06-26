@@ -1,33 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-
-interface Experience {
-  title: string;
-  company: string;
-  startDate: string;
-  endDate: string;
-  description: string;
-}
-
-interface Education {
-  degree: string;
-  institution: string;
-  graduationDate: string;
-  field: string;
-}
-
-interface JobPreferences {
-  desiredRole: string;
-  desiredLocation: string;
-  salaryRange: {
-    min: number;
-    max: number;
-  };
-  remotePreference: 'remote' | 'hybrid' | 'onsite';
-}
+import { useState } from 'react';
+import { FileUpload } from '@/components/FileUpload';
+import { processFileUpload } from '@/lib/fileUtils';
 
 interface Job {
   id: string;
@@ -35,199 +10,134 @@ interface Job {
   company: string;
   location: string;
   description: string;
-  match_score: number;
-  applied?: boolean;
-}
-
-interface GuestSession {
-  applications_remaining: number;
-  resume_data: {
-    skills: string[];
-    experience: Experience[];
-    education: Education[];
-    job_preferences: JobPreferences;
-  };
+  url: string;
+  createdAt: string;
 }
 
 export default function GuestJobsPage() {
-  const searchParams = useSearchParams();
-  const sessionId = searchParams.get('sessionId');
-  
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [session, setSession] = useState<GuestSession | null>(null);
-  const supabase = createClientComponentClient();
+  const [uploadProgress, setUploadProgress] = useState<string>('');
 
-  useEffect(() => {
-    if (!sessionId) {
-      setError('No session ID provided');
-      setLoading(false);
-      return;
-    }
+  const handleFileUpload = async (file: File) => {
+    setError(null);
+    setIsLoading(true);
+    setUploadProgress('Processing your resume...');
 
-    async function fetchSessionAndJobs() {
-      try {
-        // Fetch guest session data
-        const { data: sessionData, error: sessionError } = await supabase
-          .from('guest_sessions')
-          .select('*')
-          .eq('session_id', sessionId)
-          .single();
-
-        if (sessionError) throw sessionError;
-        if (!sessionData) throw new Error('Session not found');
-
-        setSession(sessionData as GuestSession);
-
-        // Fetch matching jobs
-        const response = await fetch('/api/jobs/match', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            sessionId,
-            resumeData: sessionData.resume_data,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error('Failed to fetch matching jobs');
-        }
-
-        const { jobs: matchedJobs } = await response.json();
-        setJobs(matchedJobs);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'An error occurred');
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchSessionAndJobs();
-  }, [sessionId, supabase]);
-
-  async function handleApply(jobId: string) {
     try {
-      if (!session || session.applications_remaining <= 0) {
-        setError('No applications remaining. Please create an account to continue.');
-        return;
+      // Process the file
+      console.log('Processing file:', {
+        name: file.name,
+        type: file.type,
+        size: file.size
+      });
+
+      const { text, error: processError } = await processFileUpload(file);
+      
+      if (processError) {
+        if (processError.includes('PDF parsing is not yet implemented')) {
+          throw new Error('PDF file support is coming soon! For now, please upload a DOCX file.');
+        }
+        throw new Error(processError);
       }
 
-      const response = await fetch('/api/jobs/apply', {
+      console.log('Text extracted successfully, length:', text?.length || 0);
+      setUploadProgress('Analyzing resume content...');
+
+      // Prepare the request body
+      const requestBody = {
+        resumeText: text,
+        fileName: file.name,
+        fileType: file.type,
+      };
+
+      console.log('Sending request to process-resume:', {
+        fileName: file.name,
+        fileType: file.type,
+        textLength: text?.length || 0
+      });
+
+      // Send the extracted text to the server
+      const response = await fetch('/api/guest/process-resume', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          sessionId,
-          jobId,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to apply for job');
+        const errorData = await response.json();
+        console.error('Server error response:', errorData);
+        if (response.status === 429) {
+          throw new Error(`Rate limit exceeded. ${errorData.message || 'Please try again later.'}`);
+        }
+        throw new Error(errorData.message || 'Failed to process resume');
       }
 
-      // Update applications remaining
-      setSession(prev => prev ? {
-        ...prev,
-        applications_remaining: prev.applications_remaining - 1
-      } : null);
-
-      // Update job status in the list
-      setJobs(prev => prev.map(job => 
-        job.id === jobId ? { ...job, applied: true } : job
-      ));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to apply for job');
+      setUploadProgress('Finding matching jobs...');
+      const data = await response.json();
+      console.log('Received job matches:', data.matchedJobs?.length || 0);
+      setJobs(data.matchedJobs);
+    } catch (error) {
+      console.error('Error in handleFileUpload:', error);
+      setError(error instanceof Error ? error.message : 'Failed to process resume');
+    } finally {
+      setIsLoading(false);
+      setUploadProgress('');
     }
-  }
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center">
-            <div className="animate-pulse">Loading matching jobs...</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto">
-          <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded">
-            {error}
-          </div>
-        </div>
-      </div>
-    );
-  }
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto">
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-extrabold text-gray-900 mb-4">
-            Your Matching Jobs
-          </h1>
-          <p className="text-lg text-gray-600">
-            Applications remaining: {session?.applications_remaining || 0}
-          </p>
+    <div className="container mx-auto px-4 py-8">
+      <h1 className="text-3xl font-bold mb-8">Find Jobs Matching Your Resume</h1>
+      
+      <div className="mb-8">
+        <h2 className="text-xl font-semibold mb-4">Upload Your Resume</h2>
+        <div className="bg-white p-6 rounded-lg shadow-sm">
+          <FileUpload onUpload={handleFileUpload} />
+          {uploadProgress && (
+            <p className="mt-4 text-sm text-gray-600">{uploadProgress}</p>
+          )}
         </div>
-
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {jobs.map((job) => (
-            <div
-              key={job.id}
-              className="bg-white rounded-lg shadow-md overflow-hidden"
-            >
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-semibold text-gray-900">
-                    {job.title}
-                  </h2>
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                    {job.match_score}% Match
-                  </span>
-                </div>
-                <div className="mb-4">
-                  <p className="text-sm text-gray-600">{job.company}</p>
-                  <p className="text-sm text-gray-600">{job.location}</p>
-                </div>
-                <p className="text-sm text-gray-500 mb-4 line-clamp-3">
-                  {job.description}
-                </p>
-                <button
-                  onClick={() => handleApply(job.id)}
-                  disabled={job.applied || (session?.applications_remaining || 0) <= 0}
-                  className={`w-full px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white 
-                    ${
-                      job.applied
-                        ? 'bg-gray-400 cursor-not-allowed'
-                        : session?.applications_remaining && session.applications_remaining > 0
-                        ? 'bg-blue-600 hover:bg-blue-700'
-                        : 'bg-gray-400 cursor-not-allowed'
-                    }`}
-                >
-                  {job.applied ? 'Applied' : 'Apply Now'}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {jobs.length === 0 && (
-          <div className="text-center text-gray-600 mt-8">
-            No matching jobs found. Try uploading a different resume or check back later.
-          </div>
-        )}
       </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-8">
+          <p className="text-red-800">{error}</p>
+        </div>
+      )}
+
+      {jobs.length > 0 && (
+        <div>
+          <h2 className="text-xl font-semibold mb-4">Matching Jobs</h2>
+          <div className="grid gap-6">
+            {jobs.map((job) => (
+              <div key={job.id} className="bg-white shadow rounded-lg p-6">
+                <h3 className="text-lg font-semibold mb-2">{job.title}</h3>
+                <p className="text-gray-600 mb-2">{job.company} • {job.location}</p>
+                <p className="text-gray-700 mb-4">{job.description}</p>
+                <a
+                  href={job.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:text-blue-800"
+                >
+                  View Job →
+                </a>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!isLoading && !error && jobs.length === 0 && (
+        <div className="text-center py-8">
+          <p className="text-gray-600">Upload your resume to find matching jobs</p>
+          <p className="text-sm text-gray-500 mt-2">Supported formats: DOCX (PDF support coming soon)</p>
+        </div>
+      )}
     </div>
   );
 } 

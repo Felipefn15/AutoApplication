@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabaseClient';
 import Link from 'next/link';
@@ -15,6 +15,33 @@ export default function LoginPage() {
   const redirectPath = searchParams.get('redirectedFrom') || '/jobs';
   const supabase = createClient();
 
+  // Check if we're coming from a guest session
+  const guestSessionId = typeof window !== 'undefined' ? localStorage.getItem('guestSessionId') : null;
+
+  useEffect(() => {
+    // If we have a guest session, check if it's valid
+    async function checkGuestSession() {
+      if (!guestSessionId) return;
+
+      try {
+        const { data: session, error } = await supabase
+          .from('guest_sessions')
+          .select('applications_remaining')
+          .eq('session_id', guestSessionId)
+          .single();
+
+        if (error || !session) {
+          // Invalid or expired guest session, remove it
+          localStorage.removeItem('guestSessionId');
+        }
+      } catch (error) {
+        console.error('Error checking guest session:', error);
+      }
+    }
+
+    checkGuestSession();
+  }, [guestSessionId, supabase]);
+
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -28,6 +55,37 @@ export default function LoginPage() {
 
       if (error) {
         throw error;
+      }
+
+      // If we had a guest session, we'll want to transfer the data
+      if (guestSessionId) {
+        try {
+          // Get the guest session data
+          const { data: guestData } = await supabase
+            .from('guest_sessions')
+            .select('*')
+            .eq('session_id', guestSessionId)
+            .single();
+
+          if (guestData) {
+            // Transfer guest data to user account
+            // This would be implemented in your backend
+            await fetch('/api/auth/transfer-guest-data', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                guestSessionId,
+              }),
+            });
+          }
+
+          // Clear the guest session
+          localStorage.removeItem('guestSessionId');
+        } catch (error) {
+          console.error('Error transferring guest data:', error);
+        }
       }
 
       router.push(redirectPath);
@@ -46,6 +104,11 @@ export default function LoginPage() {
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
             Sign in to your account
           </h2>
+          {guestSessionId && (
+            <p className="mt-2 text-center text-sm text-gray-600">
+              Sign in to save your guest progress
+            </p>
+          )}
           <p className="mt-2 text-center text-sm text-gray-600">
             Or{' '}
             <Link

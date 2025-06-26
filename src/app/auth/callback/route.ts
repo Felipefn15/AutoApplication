@@ -28,37 +28,37 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/auth/auth-code-error`)
   }
 
-  const response = NextResponse.redirect(`${origin}${next}`)
+    const response = NextResponse.redirect(`${origin}${next}`)
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
           const cookie = request.cookies.get(name)
           console.log('Reading cookie:', { name, value: cookie ? '**present**' : '**missing**' });
           return cookie?.value
-        },
-        set(name: string, value: string, options: CookieOptions) {
+          },
+          set(name: string, value: string, options: CookieOptions) {
           console.log('Setting cookie:', { name, options });
-          response.cookies.set({
-            name,
-            value,
-            ...options,
-          })
-        },
-        remove(name: string, options: CookieOptions) {
+            response.cookies.set({
+              name,
+              value,
+              ...options,
+            })
+          },
+          remove(name: string, options: CookieOptions) {
           console.log('Removing cookie:', { name, options });
-          response.cookies.set({
-            name,
-            value: '',
-            ...options,
-          })
+            response.cookies.set({
+              name,
+              value: '',
+              ...options,
+            })
+          },
         },
-      },
-    }
-  )
+      }
+    )
 
   try {
     console.log('Attempting to exchange code for session...');
@@ -90,6 +90,6 @@ export async function GET(request: NextRequest) {
       } : error,
       timestamp: new Date().toISOString()
     });
-    return NextResponse.redirect(`${origin}/auth/auth-code-error`)
+  return NextResponse.redirect(`${origin}/auth/auth-code-error`)
   }
 } 

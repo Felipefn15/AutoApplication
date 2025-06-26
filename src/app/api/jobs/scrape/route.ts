@@ -3,6 +3,8 @@ import { getAdminClient } from '@/lib/supabaseClient';
 import { createClient } from '@supabase/supabase-js';
 import { scrapeJobs } from '@/lib/scraper';
 import type { JobListing } from '@/lib/scraper';
+import { supabase } from '@/lib/supabaseClient';
+import type { Job } from '@/types/job';
 
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
@@ -92,68 +94,48 @@ export async function POST(request: Request) {
 
 export async function GET() {
   try {
-    // Check if it's time to scrape (based on environment variable)
-    const intervalMinutes = parseInt(process.env.SCRAPING_INTERVAL_MINUTES || '60', 10);
-    const supabase = getAdminClient();
+    // Scrape jobs from multiple sources
+    const jobs = await scrapeJobs();
 
-    // Get the last scrape time
-    const { data: lastScrape } = await supabase
-      .from('scrape_logs')
-      .select('created_at')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (lastScrape) {
-      const lastScrapeTime = new Date(lastScrape.created_at);
-      const timeSinceLastScrape = (Date.now() - lastScrapeTime.getTime()) / 1000 / 60;
-
-      if (timeSinceLastScrape < intervalMinutes) {
-        return NextResponse.json({
-          message: 'Too soon to scrape again',
-          nextScrapeIn: Math.round(intervalMinutes - timeSinceLastScrape)
-        });
-      }
+    if (!Array.isArray(jobs)) {
+      throw new Error('Scraper did not return an array of jobs');
     }
 
-    // Scrape jobs from all sources
-    const jobs = await scrapeAllSources();
-
-    // Get existing jobs from the last 24 hours to avoid duplicates
-    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { data: existingJobs } = await supabase
+    // Insert jobs into Supabase
+    const { data: existingJobs, error: fetchError } = await supabase
       .from('jobs')
-      .select('link')
-      .gte('created_at', yesterday);
+      .select('url');
 
-    // Deduplicate jobs
-    const newJobs = deduplicateJobs(jobs, existingJobs || []);
+    if (fetchError) {
+      console.error('Error fetching existing jobs:', fetchError);
+      return NextResponse.json(
+        { error: 'Failed to check existing jobs' },
+        { status: 500 }
+      );
+    }
+
+    const existingUrls = new Set(existingJobs?.map(job => job.url) || []);
+    const newJobs = jobs.filter((job: Job) => !existingUrls.has(job.url));
 
     if (newJobs.length > 0) {
-      // Insert new jobs
-      const { error: jobsError } = await supabase
+      const { error: insertError } = await supabase
         .from('jobs')
-        .insert(newJobs.map(job => ({
-          ...job,
-          applied: false
-        })));
+        .insert(newJobs);
 
-      if (jobsError) {
-        throw jobsError;
+      if (insertError) {
+        console.error('Error inserting jobs:', insertError);
+        return NextResponse.json(
+          { error: 'Failed to store jobs' },
+          { status: 500 }
+        );
       }
     }
 
-    // Log the scrape
-    await supabase
-      .from('scrape_logs')
-      .insert([{ jobs_found: jobs.length, jobs_added: newJobs.length }]);
-
     return NextResponse.json({
-      message: 'Scraping completed successfully',
-      jobsFound: jobs.length,
-      newJobsAdded: newJobs.length
+      message: 'Jobs scraped successfully',
+      totalJobs: jobs.length,
+      newJobs: newJobs.length
     });
-
   } catch (error) {
     console.error('Error in job scraping:', error);
     return NextResponse.json(

@@ -4,6 +4,8 @@ import type { NextRequest } from 'next/server';
 
 export async function middleware(request: NextRequest) {
   const res = NextResponse.next();
+
+  // Create the Supabase client
   const supabase = createMiddlewareClient({ req: request, res });
 
   // Check if the path is public
@@ -12,23 +14,27 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname.startsWith('/guest') ||
     request.nextUrl.pathname === '/';
 
+  // If it's a public path, allow access
   if (isPublicPath) {
     return res;
   }
 
-  // Check if we have a session
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  try {
+    // Refresh session if expired - required for Server Components
+    const { data: { session }, error } = await supabase.auth.getSession();
 
-  // If there's no session and the path is not public, redirect to login
-  if (!session && !isPublicPath) {
-    const redirectUrl = new URL('/auth/login', request.url);
-    redirectUrl.searchParams.set('redirectedFrom', request.nextUrl.pathname);
-    return NextResponse.redirect(redirectUrl);
+    // Handle paths that require authentication
+    if (!session && !isPublicPath) {
+      const redirectUrl = new URL('/auth/login', request.url);
+      redirectUrl.searchParams.set('redirectedFrom', request.nextUrl.pathname);
+      return NextResponse.redirect(redirectUrl);
+    }
+
+    return res;
+  } catch (error) {
+    console.error('Error in middleware:', error);
+    return res;
   }
-
-  return res;
 }
 
 export const config = {
@@ -39,7 +45,8 @@ export const config = {
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - public folder
+     * - api folder (API routes)
      */
-    '/((?!_next/static|_next/image|favicon.ico|public/).*)',
+    '/((?!_next/static|_next/image|favicon.ico|public|api).*)',
   ],
 }; 

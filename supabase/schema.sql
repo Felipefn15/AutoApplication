@@ -81,31 +81,41 @@ Best regards,',
 -- Create a table for user profiles
 CREATE TABLE public.profiles (
     id uuid references auth.users on delete cascade not null primary key,
-    email text not null,
-    search_keywords text[] default array[]::text[] not null,
-    job_types text[] default array[]::text[] not null,
-    resume_url text,
-    preferences jsonb default '{"remote_only": true, "full_time_only": true}'::jsonb not null,
     created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-    updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+    email text not null unique,
+    full_name text,
+    resume_url text,
+    job_preferences jsonb default '{
+        "roles": [],
+        "locations": [],
+        "remote": true,
+        "salary_min": null,
+        "salary_max": null,
+        "skills": []
+    }'::jsonb,
+    settings jsonb default '{
+        "email_notifications": true,
+        "auto_apply": false
+    }'::jsonb
 );
 
 -- Create a table for jobs
 CREATE TABLE public.jobs (
     id uuid default uuid_generate_v4() not null primary key,
-    user_id uuid references public.profiles on delete cascade not null,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
     title text not null,
     company text not null,
     location text not null,
-    type text not null,
     description text not null,
+    url text not null unique,
+    status text not null default 'pending' check (status in ('pending', 'applied', 'rejected', 'interviewing')),
+    user_id uuid references public.profiles on delete cascade not null,
     source text not null,
-    source_url text not null unique,
-    apply_url text,
-    posted_at timestamp with time zone not null,
-    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-    applied boolean default false not null,
-    applied_at timestamp with time zone
+    salary_range text,
+    requirements text[],
+    benefits text[],
+    applied_at timestamp with time zone,
+    last_status_change timestamp with time zone default timezone('utc'::text, now())
 );
 
 -- Set up Row Level Security (RLS)
@@ -134,7 +144,7 @@ CREATE POLICY "Users can insert own jobs"
     WITH CHECK (auth.uid() = user_id);
 
 -- Create a function to handle new user signup
-CREATE FUNCTION public.handle_new_user()
+CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER SET search_path = public
@@ -147,6 +157,7 @@ END;
 $$;
 
 -- Create a trigger to create a profile when a new user signs up
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();

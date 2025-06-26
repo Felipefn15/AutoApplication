@@ -1,10 +1,14 @@
-'use client';
-
+import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
-import './globals.css';
 import Navigation from '@/components/Navigation';
+import './globals.css';
 
 const inter = Inter({ subsets: ['latin'] });
+
+export const metadata: Metadata = {
+  title: 'Auto Job Application - AI-Powered Job Search',
+  description: 'Upload your resume and let AI find and apply to matching jobs automatically.',
+};
 
 export default function RootLayout({
   children,
@@ -14,8 +18,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <Navigation />
-        <main className="min-h-screen bg-gray-50">{children}</main>
+        <main>
+          <Navigation />
+          {children}
+        </main>
       </body>
     </html>
   );

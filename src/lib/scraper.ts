@@ -1,186 +1,108 @@
-import { getAdminClient } from './supabaseClient';
-import type { UserProfile } from '@/types';
+import * as cheerio from 'cheerio';
+import type { Job } from '@/types/job';
 
-export interface JobListing {
-  title: string;
-  company: string;
-  location: string;
-  type: string;
-  description: string;
-  source: string;
-  source_url: string;
-  apply_url?: string;
-  posted_at: string;
-}
-
-interface WWRJob {
-  title: string;
-  company_name: string;
-  job_type: string;
-  description: string;
-  url: string;
-  published_at: string;
-}
-
-interface RemoteOKJob {
-  position: string;
-  company: string;
-  job_type: string;
-  description: string;
-  id: string;
-  url: string;
-  date: string;
-}
-
-interface GitHubJob {
-  title: string;
-  company: string;
-  location: string;
-  type: string;
-  description: string;
-  url: string;
-  created_at: string;
-}
-
-async function scrapeWeworkremotely(keywords: string[]): Promise<JobListing[]> {
+// Scrape jobs from WeWorkRemotely
+async function scrapeWWR(): Promise<Job[]> {
   try {
-    const response = await fetch('https://weworkremotely.com/remote-jobs.json');
-    const data = await response.json();
-    
-    return data.jobs
-      .filter((job: WWRJob) => 
-        keywords.some(keyword => 
-          job.title.toLowerCase().includes(keyword.toLowerCase()) ||
-          job.description.toLowerCase().includes(keyword.toLowerCase())
-        )
-      )
-      .map((job: WWRJob) => ({
-        title: job.title,
-        company: job.company_name,
-        location: 'Remote',
-        type: job.job_type || 'Full-time',
-        description: job.description,
-        source: 'WeWorkRemotely',
-        source_url: job.url,
-        apply_url: job.url,
-        posted_at: new Date(job.published_at).toISOString(),
-      }));
+    const response = await fetch('https://weworkremotely.com/remote-jobs/search?term=');
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    const jobs: Job[] = [];
+
+    $('article.feature, li.feature')
+      .slice(0, 20) // Limit to first 20 jobs for now
+      .each((_, element) => {
+        const $el = $(element);
+        const title = $el.find('span.title').text().trim();
+        const company = $el.find('span.company').text().trim();
+        const location = $el.find('span.region').text().trim() || 'Remote';
+        const description = $el.find('div.listing-container').text().trim();
+        const url = 'https://weworkremotely.com' + $el.find('a:first').attr('href');
+        const posted_at = $el.find('time').attr('datetime') || new Date().toISOString();
+        
+        // Skip if missing required fields
+        if (!title || !company || !description) {
+          return;
+        }
+        
+        // Extract skills from job description
+        const skills = extractSkills(description);
+        
+        const job: Job = {
+          title,
+          company,
+          location,
+          description,
+          url,
+          source: 'WeWorkRemotely',
+          posted_at: new Date(posted_at).toISOString(),
+          skills,
+          employment_type: 'Full-time'
+        };
+        
+        jobs.push(job);
+      });
+
+    return jobs;
   } catch (error) {
     console.error('Error scraping WeWorkRemotely:', error);
     return [];
   }
 }
 
-async function scrapeRemoteok(keywords: string[]): Promise<JobListing[]> {
+// Scrape jobs from Remotive
+async function scrapeRemotive(): Promise<Job[]> {
   try {
-    const response = await fetch('https://remoteok.io/api');
+    const response = await fetch('https://remotive.com/api/remote-jobs');
     const data = await response.json();
     
-    return data
-      .filter((job: RemoteOKJob) => 
-        keywords.some(keyword => 
-          job.position.toLowerCase().includes(keyword.toLowerCase()) ||
-          job.description.toLowerCase().includes(keyword.toLowerCase())
-        )
-      )
-      .map((job: RemoteOKJob) => ({
-        title: job.position,
-        company: job.company,
-        location: 'Remote',
-        type: job.job_type || 'Full-time',
+    return data.jobs.slice(0, 20).map((job: any) => {
+      const scrapedJob: Job = {
+        title: job.title,
+        company: job.company_name,
+        location: job.candidate_required_location || 'Remote',
         description: job.description,
-        source: 'RemoteOK',
-        source_url: `https://remoteok.io/l/${job.id}`,
-        apply_url: job.url,
-        posted_at: new Date(job.date).toISOString(),
-      }));
-  } catch (error) {
-    console.error('Error scraping RemoteOK:', error);
-    return [];
-  }
-}
-
-async function scrapeGithub(keywords: string[]): Promise<JobListing[]> {
-  try {
-    const jobs = await Promise.all(
-      keywords.map(async (keyword) => {
-        const response = await fetch(
-          `https://jobs.github.com/positions.json?description=${encodeURIComponent(keyword)}&location=remote`
-        );
-        return response.json();
-      })
-    );
-
-    return jobs.flat().map((job: GitHubJob) => ({
-      title: job.title,
-      company: job.company,
-      location: job.location,
-      type: job.type,
-      description: job.description,
-      source: 'GitHub',
-      source_url: job.url,
-      apply_url: job.url,
-      posted_at: new Date(job.created_at).toISOString(),
-    }));
-  } catch (error) {
-    console.error('Error scraping GitHub:', error);
-    return [];
-  }
-}
-
-export async function scrapeJobs(profile: UserProfile) {
-  const supabase = getAdminClient();
-  const keywords = profile.search_keywords;
-  const jobTypes = profile.job_types;
-
-  try {
-    // Scrape jobs from all sources
-    const jobs = await Promise.all([
-      scrapeWeworkremotely(keywords),
-      scrapeRemoteok(keywords),
-      scrapeGithub(keywords),
-    ]).then(results => results.flat());
-
-    // Filter jobs based on preferences
-    const filteredJobs = jobs.filter(job => {
-      // Check if job type matches user preferences
-      if (jobTypes.length > 0 && !jobTypes.some(type => 
-        job.type.toLowerCase().includes(type.toLowerCase())
-      )) {
-        return false;
-      }
-
-      // Check if job is remote (if remote_only is set)
-      if (profile.preferences.remote_only && 
-          !job.location.toLowerCase().includes('remote')) {
-        return false;
-      }
-
-      // Check if job is full-time (if full_time_only is set)
-      if (profile.preferences.full_time_only && 
-          !job.type.toLowerCase().includes('full-time')) {
-        return false;
-      }
-
-      return true;
+        url: job.url,
+        source: 'Remotive',
+        posted_at: new Date(job.publication_date || Date.now()).toISOString(),
+        skills: extractSkills(job.description),
+        salary: job.salary || undefined,
+        employment_type: job.job_type || 'Full-time',
+        experience_level: job.experience_level
+      };
+      return scrapedJob;
     });
+  } catch (error) {
+    console.error('Error scraping Remotive:', error);
+    return [];
+  }
+}
 
-    // Insert jobs into database
-    for (const job of filteredJobs) {
-      const { error } = await supabase
-        .from('jobs')
-        .insert([{
-          ...job,
-          user_id: profile.id,
-          created_at: new Date().toISOString(),
-          applied: false,
-        }]);
+// Helper function to extract skills from job description
+function extractSkills(description: string): string[] {
+  const commonSkills = [
+    'javascript', 'typescript', 'python', 'java', 'c++', 'ruby', 'go', 'rust',
+    'react', 'vue', 'angular', 'node', 'express', 'django', 'flask',
+    'aws', 'azure', 'gcp', 'docker', 'kubernetes', 'terraform',
+    'sql', 'mongodb', 'postgresql', 'mysql', 'redis',
+    'git', 'ci/cd', 'agile', 'scrum'
+  ];
+  
+  const descLower = description.toLowerCase();
+  return commonSkills.filter(skill => descLower.includes(skill));
+}
 
-      if (error && error.code !== '23505') { // Ignore unique constraint violations
-        console.error('Error inserting job:', error);
-      }
-    }
+// Main function to scrape jobs from all sources
+export async function scrapeJobs(): Promise<Job[]> {
+  try {
+    const [wwrJobs, remotiveJobs] = await Promise.all([
+      scrapeWWR(),
+      scrapeRemotive()
+    ]);
+
+    return [...wwrJobs, ...remotiveJobs];
   } catch (error) {
     console.error('Error scraping jobs:', error);
+    return [];
   }
 } 
