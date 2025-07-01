@@ -1,10 +1,33 @@
 import * as cheerio from 'cheerio';
-import type { Job } from '@/types/job';
+
+export interface ScrapeParams {
+  keywords?: string[];
+  location?: string;
+}
+
+export interface Job {
+  title: string;
+  company: string;
+  description: string;
+  location?: string;
+  salary?: string;
+  requirements?: string[];
+  benefits?: string[];
+  url: string;
+  source: string;
+  posted_at: string;
+  skills: string[];
+  employment_type?: string;
+  experience_level?: string;
+}
 
 // Scrape jobs from WeWorkRemotely
-async function scrapeWWR(): Promise<Job[]> {
+async function scrapeWWR(params: ScrapeParams = {}): Promise<Job[]> {
   try {
-    const response = await fetch('https://weworkremotely.com/remote-jobs/search?term=');
+    const { keywords } = params;
+    const query = keywords && keywords.length > 0 ? encodeURIComponent(keywords.join(' ')) : '';
+    const url = `https://weworkremotely.com/remote-jobs/search?term=${query}`;
+    const response = await fetch(url);
     const html = await response.text();
     const $ = cheerio.load(html);
     const jobs: Job[] = [];
@@ -51,9 +74,21 @@ async function scrapeWWR(): Promise<Job[]> {
 }
 
 // Scrape jobs from Remotive
-async function scrapeRemotive(): Promise<Job[]> {
+async function scrapeRemotive(params: ScrapeParams = {}): Promise<Job[]> {
   try {
-    const response = await fetch('https://remotive.com/api/remote-jobs');
+    const { keywords, location } = params;
+    let url = 'https://remotive.com/api/remote-jobs';
+    const query: string[] = [];
+    if (keywords && keywords.length > 0) {
+      query.push(`search=${encodeURIComponent(keywords.join(' '))}`);
+    }
+    if (location) {
+      query.push(`location=${encodeURIComponent(location)}`);
+    }
+    if (query.length > 0) {
+      url += '?' + query.join('&');
+    }
+    const response = await fetch(url);
     const data = await response.json();
     
     return data.jobs.slice(0, 20).map((job: any) => {
@@ -93,11 +128,11 @@ function extractSkills(description: string): string[] {
 }
 
 // Main function to scrape jobs from all sources
-export async function scrapeJobs(): Promise<Job[]> {
+export async function scrapeJobs(params: ScrapeParams = {}): Promise<Job[]> {
   try {
     const [wwrJobs, remotiveJobs] = await Promise.all([
-      scrapeWWR(),
-      scrapeRemotive()
+      scrapeWWR(params),
+      scrapeRemotive(params)
     ]);
 
     return [...wwrJobs, ...remotiveJobs];

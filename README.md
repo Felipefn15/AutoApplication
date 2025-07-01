@@ -1,88 +1,213 @@
-# Auto Job Application
+# AutoApplication
 
-An AI-powered job application assistant that helps you find and apply to remote jobs automatically.
+Aplicação automática para vagas remotas com IA - **Versão Anônima e Gratuita**
 
-## Features
+## 🚀 Sobre
 
-- Upload your resume (PDF or Word format)
-- AI-powered resume analysis
-- Automatic job matching from multiple sources
-- Smart cover letter generation
-- Automatic job application via email when possible
-- Support for multiple languages (matches job posting language)
+O AutoApplication é uma ferramenta que automatiza o processo de busca e aplicação para vagas remotas. A versão atual é **totalmente anônima e gratuita**, sem necessidade de cadastro ou banco de dados.
 
-## Tech Stack
+### ✨ Funcionalidades
 
-- Next.js 14 with App Router
-- TypeScript
-- Tailwind CSS
-- Groq LLM API
-- Cheerio for web scraping
-- Nodemailer for email sending
+- **Upload de currículo** (PDF/DOCX) com extração automática de dados
+- **Busca inteligente** de vagas remotas usando scraping + IA (Groq)
+- **Filtragem personalizada** baseada no perfil do candidato
+- **Geração automática** de cartas de apresentação personalizadas
+- **Aplicação automática** via email com currículo anexado
+- **Interface moderna** e responsiva
 
-## Prerequisites
+## 🛠️ Tecnologias
 
-- Node.js 18+
-- pnpm
-- Groq API key
-- SMTP server for sending applications
+- **Frontend**: Next.js 14, React, TypeScript, Tailwind CSS
+- **Backend**: Next.js API Routes
+- **IA**: Groq API (Llama3-8b-8192)
+- **Email**: Resend API ou SMTP (Gmail, Brevo)
+- **Scraping**: Cheerio, Playwright headless
+- **Parsing**: pdf-parse, mammoth (PDF/DOCX)
 
-## Installation
+## 📦 Instalação
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/autoapplication.git
-   cd autoapplication
-   ```
+### Pré-requisitos
 
-2. Install dependencies:
-   ```bash
-   pnpm install
-   ```
+- Node.js 18+ 
+- pnpm (recomendado) ou npm
 
-3. Copy the environment variables example file:
-   ```bash
-   cp src/env.example .env.local
-   ```
-
-4. Update the environment variables in `.env.local` with your:
-   - Groq API key
-   - SMTP server configuration
-
-## Development
-
-Run the development server:
+### 1. Clone o repositório
 
 ```bash
-pnpm dev
+git clone <repository-url>
+cd AutoApplication
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Instale as dependências
 
-## Usage
+```bash
+pnpm install
+```
 
-1. Visit the homepage and upload your resume (PDF or Word format, max 5MB)
-2. The AI will analyze your resume and find matching jobs
-3. Review the matched jobs and select the ones you want to apply to
-4. Click "Apply" to generate personalized cover letters and submit applications
-5. For jobs without direct email application, you'll receive the cover letter and a link to apply manually
+### 3. Configure as variáveis de ambiente
 
-## Job Sources
+Copie o arquivo `.env.example` para `.env.local`:
 
-Currently supports scraping from:
-- WeWorkRemotely
-- Remotive
+```bash
+cp src/env.example .env.local
+```
 
-More sources will be added in future updates.
+Configure as variáveis necessárias:
 
-## Contributing
+```env
+# === Groq API Configuration ===
+GROQ_API_KEY=your_groq_api_key_here
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+# === Email Configuration (for auto-apply) ===
+# Opção 1: Resend (https://resend.com/)
+RESEND_API_KEY=your_resend_api_key_here
+RESEND_SENDER_EMAIL=your_verified_sender@example.com
 
-## License
+# OU
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+# Opção 2: SMTP (Gmail, Brevo etc)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your_email@example.com
+SMTP_PASSWORD=your_app_password_here
+
+# === Scraping Configuration ===
+SCRAPING_INTERVAL_MINUTES=60
+MAX_JOBS_PER_SCRAPE=100
+```
+
+### 4. Execute o projeto
+
+```bash
+# Desenvolvimento
+pnpm dev
+
+# Build para produção
+pnpm build
+pnpm start
+```
+
+## 🔧 Configuração dos Serviços
+
+### Groq API
+1. Acesse [console.groq.com](https://console.groq.com)
+2. Crie uma conta e obtenha sua API key
+3. Adicione a key no `.env.local`
+
+### Email (Resend - Recomendado)
+1. Acesse [resend.com](https://resend.com)
+2. Crie uma conta gratuita
+3. Verifique seu domínio de email
+4. Obtenha a API key e adicione no `.env.local`
+
+### Email (SMTP - Alternativa)
+Para Gmail:
+1. Ative a verificação em 2 etapas
+2. Gere uma senha de app
+3. Use `smtp.gmail.com:587` como configuração
+
+## 📁 Estrutura do Projeto
+
+```
+src/
+├── app/
+│   ├── api/
+│   │   ├── jobs/
+│   │   │   ├── scrape/route.ts    # Busca de vagas
+│   │   │   └── apply/route.ts     # Aplicação automática
+│   │   └── ...
+│   ├── page.tsx                   # Página principal
+│   └── layout.tsx
+├── lib/
+│   ├── resumeParser.ts            # Parser de currículos
+│   ├── coverLetterGenerator.ts    # Gerador de cartas
+│   ├── emailSender.ts             # Envio de emails
+│   └── scraper.ts                 # Scraping de vagas
+└── components/
+    └── ...
+```
+
+## 🚀 Deploy na Vercel
+
+1. Conecte seu repositório à Vercel
+2. Configure as variáveis de ambiente na Vercel
+3. Deploy automático a cada push
+
+### Variáveis de ambiente na Vercel
+
+Adicione todas as variáveis do `.env.local` no painel da Vercel:
+- `GROQ_API_KEY`
+- `RESEND_API_KEY` (ou configurações SMTP)
+- `RESEND_SENDER_EMAIL`
+
+## 📋 Como Usar
+
+### 1. Upload do Currículo
+- Acesse a aplicação
+- Faça upload do seu currículo (PDF ou DOCX)
+- O sistema extrai automaticamente seus dados
+
+### 2. Busca de Vagas
+- O sistema busca vagas remotas automaticamente
+- Filtra as mais relevantes baseado no seu perfil
+- Exibe até 10 vagas personalizadas
+
+### 3. Seleção e Aplicação
+- Selecione as vagas de interesse (máximo 5)
+- Clique em "Aplicar Automaticamente"
+- O sistema gera cartas personalizadas e envia emails
+
+## 🔒 Privacidade e Segurança
+
+- **Nenhum dado é persistido** - tudo funciona em memória durante a sessão
+- **Sem cadastro obrigatório** - totalmente anônimo
+- **Sem banco de dados** - não armazenamos informações pessoais
+- **Limite de aplicações** - máximo 5 vagas por sessão para evitar spam
+
+## 📊 Limites e Restrições
+
+- **Tamanho do currículo**: Máximo 5MB
+- **Formatos suportados**: PDF, DOCX
+- **Vagas por aplicação**: Máximo 5
+- **Intervalo entre aplicações**: 2 segundos
+- **Tamanho da carta**: Máximo 200 palavras
+
+## 🐛 Troubleshooting
+
+### Erro ao processar currículo
+- Verifique se o arquivo é PDF ou DOCX
+- Confirme se o tamanho é menor que 5MB
+- Teste com um currículo mais simples
+
+### Erro ao enviar emails
+- Verifique as configurações do Resend/SMTP
+- Confirme se o email remetente está verificado
+- Teste com configurações SMTP alternativas
+
+### Vagas não encontradas
+- O scraping pode estar temporariamente indisponível
+- Tente novamente em alguns minutos
+- Verifique se os sites de vagas estão acessíveis
+
+## 🤝 Contribuição
+
+1. Fork o projeto
+2. Crie uma branch para sua feature
+3. Commit suas mudanças
+4. Push para a branch
+5. Abra um Pull Request
+
+## 📄 Licença
+
+Este projeto está sob a licença MIT. Veja o arquivo `LICENSE` para mais detalhes.
+
+## 🆘 Suporte
+
+Para dúvidas ou problemas:
+- Abra uma issue no GitHub
+- Verifique a documentação dos serviços utilizados
+- Consulte os logs da aplicação
+
+---
+
+**Nota**: Esta é uma versão anônima e gratuita. Para funcionalidades avançadas como histórico de aplicações, perfil persistente e mais vagas, considere a versão completa com autenticação.
