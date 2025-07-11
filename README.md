@@ -28,29 +28,29 @@ O AutoApplication é uma ferramenta que automatiza o processo de busca e aplica�
 
 ### Pré-requisitos
 
-- Node.js 18+ 
+- Node.js 18+
 - pnpm (recomendado) ou npm
 
 ### 1. Clone o repositório
 
-```bash
+   ```bash
 git clone <repository-url>
 cd AutoApplication
-```
+   ```
 
 ### 2. Instale as dependências
 
-```bash
-pnpm install
-```
+   ```bash
+   pnpm install
+   ```
 
 ### 3. Configure as variáveis de ambiente
 
 Copie o arquivo `.env.example` para `.env.local`:
 
-```bash
-cp src/env.example .env.local
-```
+   ```bash
+   cp src/env.example .env.local
+   ```
 
 Configure as variáveis necessárias:
 

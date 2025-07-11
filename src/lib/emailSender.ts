@@ -1,6 +1,5 @@
 import nodemailer from 'nodemailer';
 import { ResumeData } from './resumeParser';
-import { JobData } from './coverLetterGenerator';
 
 export interface EmailConfig {
   to: string;
@@ -92,7 +91,7 @@ async function sendWithSMTP(config: EmailConfig): Promise<boolean> {
  */
 export async function sendApplicationEmail(
   resumeData: ResumeData,
-  jobData: JobData,
+  jobData: any,
   coverLetter: string,
   resumeBuffer: Buffer,
   resumeFileName: string
@@ -185,26 +184,52 @@ export async function sendApplicationEmail(
 /**
  * Extrai email do recrutador da descrição da vaga
  */
-function extractRecruiterEmail(description: string): string | null {
+export function extractRecruiterEmail(description: string): string | null {
   // Padrões comuns de email em descrições de vaga
   const emailPatterns = [
-    /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
-    /contato@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
-    /jobs@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
-    /hr@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
-    /careers@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
+    // Padrões específicos de recrutamento
+    /(?:send|submit|apply|email)[^@]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i,
+    /(?:hr|recruiting|careers|jobs|talent)@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i,
+    
+    // Padrões de contato geral
+    /contact@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i,
+    /info@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i,
+    
+    // Qualquer email com contexto de aplicação
+    /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i
   ];
 
+  let foundEmail: string | null = null;
+
+  // Procura por emails com prioridade baseada na ordem dos padrões
   for (const pattern of emailPatterns) {
     const matches = description.match(pattern);
     if (matches && matches.length > 0) {
-      return matches[0];
+      // Se encontrou um grupo de captura, use ele, senão use o match completo
+      foundEmail = matches[1] || matches[0];
+      break;
     }
   }
 
-  // Se não encontrar email específico, retorna um email genérico
-  // (em produção, você pode querer retornar null e não enviar o email)
-  return 'jobs@example.com';
+  // Validação básica do email encontrado
+  if (foundEmail) {
+    // Remove caracteres inválidos que podem ter sido capturados
+    foundEmail = foundEmail.trim().toLowerCase();
+    
+    // Verifica se é um email válido
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (emailRegex.test(foundEmail)) {
+      // Lista de domínios bloqueados
+      const blockedDomains = ['example.com', 'test.com', 'domain.com'];
+      const domain = foundEmail.split('@')[1];
+      
+      if (!blockedDomains.includes(domain)) {
+        return foundEmail;
+      }
+    }
+  }
+
+  return null;
 }
 
 /**

@@ -97,7 +97,7 @@ Formato da carta:
 `;
 
     return await this.chat([
-      {
+        {
         role: 'system',
         content: 'Você é um assistente especializado em criar cartas de apresentação profissionais e persuasivas. Sua tarefa é gerar uma carta de apresentação personalizada que conecte as habilidades e experiências do candidato com os requisitos da vaga. A carta deve ser concisa (máximo 200 palavras), profissional e focada em demonstrar valor para a empresa.'
       },
@@ -165,6 +165,7 @@ Responda apenas com um array JSON de números, exemplo: [1, 3, 5]
       return [];
     }
   }
-}
+} 
 
-export const groqClient = new GroqClient(); 
+export const groqClient = new GroqClient();
+export { GroqClient }; 

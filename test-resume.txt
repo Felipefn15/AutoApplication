@@ -1,0 +1,27 @@
+Felipe Franca Nogueira
+felipe.nogueira@email.com
++55 11 99999-9999
+São Paulo, SP
+
+EXPERIÊNCIA PROFISSIONAL
+
+Desenvolvedor Full Stack Senior
+Empresa ABC Ltda | 2020-2023
+Desenvolvimento de aplicações web com React, Node.js e MongoDB. Implementação de APIs RESTful e integração com sistemas de pagamento. Liderança técnica de equipe de 5 desenvolvedores. Utilização de TypeScript, Docker e AWS.
+
+Desenvolvedor Frontend
+Startup XYZ | 2018-2020
+Desenvolvimento de interfaces responsivas com React e TypeScript. Otimização de performance e implementação de testes automatizados. Trabalho com Angular e Vue.js.
+
+EDUCAÇÃO
+
+Bacharel em Ciência da Computação
+Universidade de São Paulo | 2018
+
+HABILIDADES TÉCNICAS
+
+JavaScript, TypeScript, React, Node.js, Python, MongoDB, PostgreSQL, AWS, Docker, Git, CI/CD, Agile, Scrum
+
+IDIOMAS
+
+Português (Nativo), Inglês (Avançado), Espanhol (Intermediário) 

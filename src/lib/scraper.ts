@@ -1,4 +1,17 @@
 import * as cheerio from 'cheerio';
+import Groq from 'groq-sdk';
+
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
+});
+
+// Configurações
+const CONFIG = {
+  MAX_JOBS_PER_SOURCE: 50,
+  MAX_TOTAL_JOBS: 100,
+  RETRY_ATTEMPTS: 3,
+  RETRY_DELAY: 1000,
+};
 
 export interface ScrapeParams {
   keywords?: string[];
@@ -21,78 +34,183 @@ export interface Job {
   experience_level?: string;
 }
 
-// Scrape jobs from WeWorkRemotely
-async function scrapeWWR(params: ScrapeParams = {}): Promise<Job[]> {
+/**
+ * Usa LLM para gerar queries de busca otimizadas
+ */
+async function generateSearchQueries(keywords: string[], location: string): Promise<string[]> {
+  // Se tiver múltiplas keywords, use as duas primeiras para maior abrangência
+  if (keywords && keywords.length > 1) {
+    return [keywords[0], keywords[1]];
+  } else if (keywords && keywords.length === 1) {
+    return [keywords[0]];
+  }
+  return ['remote'];
+}
+
+/**
+ * Função de retry para requests
+ */
+async function retryFetch(url: string, options: RequestInit = {}, attempts = CONFIG.RETRY_ATTEMPTS): Promise<Response> {
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        ...(options.headers || {})
+      }
+    });
+    
+    if (!response.ok && attempts > 1) {
+      console.log(`Retry attempt for ${url}, attempts left: ${attempts - 1}`);
+      await new Promise(resolve => setTimeout(resolve, CONFIG.RETRY_DELAY));
+      return retryFetch(url, options, attempts - 1);
+    }
+    
+    return response;
+  } catch (error) {
+    if (attempts > 1) {
+      console.log(`Retry attempt for ${url}, attempts left: ${attempts - 1}`);
+      await new Promise(resolve => setTimeout(resolve, CONFIG.RETRY_DELAY));
+      return retryFetch(url, options, attempts - 1);
+    }
+    throw error;
+  }
+}
+
+// Scrape jobs from RemoteOK API
+async function scrapeRemoteOK(params: ScrapeParams = {}): Promise<Job[]> {
   try {
     const { keywords } = params;
-    const query = keywords && keywords.length > 0 ? encodeURIComponent(keywords.join(' ')) : '';
-    const url = `https://weworkremotely.com/remote-jobs/search?term=${query}`;
-    const response = await fetch(url);
-    const html = await response.text();
-    const $ = cheerio.load(html);
+    const queries = keywords && keywords.length > 0 ? keywords : ['remote'];
     const jobs: Job[] = [];
 
-    $('article.feature, li.feature')
-      .slice(0, 20) // Limit to first 20 jobs for now
-      .each((_, element) => {
-        const $el = $(element);
-        const title = $el.find('span.title').text().trim();
-        const company = $el.find('span.company').text().trim();
-        const location = $el.find('span.region').text().trim() || 'Remote';
-        const description = $el.find('div.listing-container').text().trim();
-        const url = 'https://weworkremotely.com' + $el.find('a:first').attr('href');
-        const posted_at = $el.find('time').attr('datetime') || new Date().toISOString();
-        
-        // Skip if missing required fields
-        if (!title || !company || !description) {
-          return;
+    // Busca para cada query
+    for (const query of queries) {
+      const url = 'https://remoteok.com/api';
+      console.log(`Scraping RemoteOK API: ${url} (query: ${query})`);
+      
+      const response = await retryFetch(url, {
+        headers: {
+          'Accept': 'application/json'
         }
-        
-        // Extract skills from job description
-        const skills = extractSkills(description);
-        
-        const job: Job = {
-          title,
-          company,
-          location,
-          description,
-          url,
-          source: 'WeWorkRemotely',
-          posted_at: new Date(posted_at).toISOString(),
-          skills,
-          employment_type: 'Full-time'
-        };
-        
-        jobs.push(job);
       });
+      
+      if (!response.ok) {
+        console.error(`RemoteOK API response not ok: ${response.status}`);
+        continue;
+      }
 
-    return jobs;
+      const data = await response.json();
+      const queryJobs = (data as any[]).slice(1)
+        .filter(job => job.position && 
+          (job.position.toLowerCase().includes(query.toLowerCase()) ||
+           (job.tags && job.tags.some((tag: string) => tag.toLowerCase().includes(query.toLowerCase()))))
+        )
+        .map(job => ({
+          title: job.position,
+          company: job.company,
+          description: job.description || '',
+          location: job.location || 'Remote',
+          url: job.url,
+          source: 'RemoteOK',
+          posted_at: job.date || new Date().toISOString(),
+          skills: job.tags || [],
+          employment_type: job.type || 'Full-time'
+        }));
+
+      jobs.push(...queryJobs);
+    }
+
+    console.log(`RemoteOK: ${jobs.length} jobs found`);
+    return jobs.slice(0, CONFIG.MAX_JOBS_PER_SOURCE);
   } catch (error) {
-    console.error('Error scraping WeWorkRemotely:', error);
+    console.error('Error scraping RemoteOK:', error);
     return [];
   }
 }
 
-// Scrape jobs from Remotive
+// Scrape jobs from WeWorkRemotely RSS
+async function scrapeWWRRSS(params: ScrapeParams = {}): Promise<Job[]> {
+  try {
+    const { keywords } = params;
+    const queries = keywords && keywords.length > 0 ? keywords : ['remote'];
+    const jobs: Job[] = [];
+
+    // Busca para cada query
+    for (const query of queries) {
+      const url = 'https://weworkremotely.com/categories/remote-programming-jobs.rss';
+      console.log(`Scraping WWR RSS: ${url} (query: ${query})`);
+      
+      const response = await retryFetch(url, {
+        headers: {
+          'Accept': 'application/rss+xml'
+        }
+      });
+      
+      if (!response.ok) {
+        console.error(`WWR RSS response not ok: ${response.status}`);
+        continue;
+      }
+
+      const xml = await response.text();
+      const $ = cheerio.load(xml, { xmlMode: true });
+      
+      $('item').each((_, el) => {
+        const title = $(el).find('title').text();
+        const description = $(el).find('description').text();
+        const link = $(el).find('link').text();
+        const pubDate = $(el).find('pubDate').text();
+        const companyMatch = description.match(/<strong>(.*?)<\/strong>/);
+        const company = companyMatch ? companyMatch[1] : 'Desconhecida';
+        
+        if (title && (
+          title.toLowerCase().includes(query.toLowerCase()) ||
+          description.toLowerCase().includes(query.toLowerCase())
+        )) {
+          jobs.push({
+          title,
+          company,
+          description,
+            location: 'Remote',
+            url: link,
+          source: 'WeWorkRemotely',
+            posted_at: pubDate ? new Date(pubDate).toISOString() : new Date().toISOString(),
+            skills: [],
+          employment_type: 'Full-time'
+          });
+        }
+      });
+    }
+
+    console.log(`WWR RSS: ${jobs.length} jobs found`);
+    return jobs.slice(0, CONFIG.MAX_JOBS_PER_SOURCE);
+  } catch (error) {
+    console.error('Error scraping WWR RSS:', error);
+    return [];
+  }
+}
+
+// Scrape jobs from Remotive API
 async function scrapeRemotive(params: ScrapeParams = {}): Promise<Job[]> {
   try {
-    const { keywords, location } = params;
-    let url = 'https://remotive.com/api/remote-jobs';
-    const query: string[] = [];
-    if (keywords && keywords.length > 0) {
-      query.push(`search=${encodeURIComponent(keywords.join(' '))}`);
-    }
-    if (location) {
-      query.push(`location=${encodeURIComponent(location)}`);
-    }
-    if (query.length > 0) {
-      url += '?' + query.join('&');
-    }
-    const response = await fetch(url);
+    const { keywords } = params;
+    const queries = keywords && keywords.length > 0 ? keywords : ['remote'];
+    const jobs: Job[] = [];
+
+    // Busca para cada query
+    for (const query of queries) {
+      const url = `https://remotive.com/api/remote-jobs?search=${encodeURIComponent(query)}&limit=${CONFIG.MAX_JOBS_PER_SOURCE}`;
+      console.log(`Scraping Remotive: ${url}`);
+      
+      const response = await retryFetch(url);
+      
+      if (!response.ok) {
+        console.error(`Remotive response not ok: ${response.status}`);
+        continue;
+      }
+
     const data = await response.json();
-    
-    return data.jobs.slice(0, 20).map((job: any) => {
-      const scrapedJob: Job = {
+      const queryJobs = data.jobs.map((job: any) => ({
         title: job.title,
         company: job.company_name,
         location: job.candidate_required_location || 'Remote',
@@ -100,42 +218,64 @@ async function scrapeRemotive(params: ScrapeParams = {}): Promise<Job[]> {
         url: job.url,
         source: 'Remotive',
         posted_at: new Date(job.publication_date || Date.now()).toISOString(),
-        skills: extractSkills(job.description),
+        skills: job.tags || [],
         salary: job.salary || undefined,
         employment_type: job.job_type || 'Full-time',
         experience_level: job.experience_level
-      };
-      return scrapedJob;
-    });
+      }));
+
+      jobs.push(...queryJobs);
+    }
+
+    console.log(`Remotive: ${jobs.length} jobs found`);
+    return jobs.slice(0, CONFIG.MAX_JOBS_PER_SOURCE);
   } catch (error) {
     console.error('Error scraping Remotive:', error);
     return [];
   }
 }
 
-// Helper function to extract skills from job description
-function extractSkills(description: string): string[] {
-  const commonSkills = [
-    'javascript', 'typescript', 'python', 'java', 'c++', 'ruby', 'go', 'rust',
-    'react', 'vue', 'angular', 'node', 'express', 'django', 'flask',
-    'aws', 'azure', 'gcp', 'docker', 'kubernetes', 'terraform',
-    'sql', 'mongodb', 'postgresql', 'mysql', 'redis',
-    'git', 'ci/cd', 'agile', 'scrum'
-  ];
-  
-  const descLower = description.toLowerCase();
-  return commonSkills.filter(skill => descLower.includes(skill));
-}
-
 // Main function to scrape jobs from all sources
 export async function scrapeJobs(params: ScrapeParams = {}): Promise<Job[]> {
   try {
-    const [wwrJobs, remotiveJobs] = await Promise.all([
-      scrapeWWR(params),
-      scrapeRemotive(params)
+    console.log('Starting job scraping with params:', params);
+    
+    // Gera queries de busca otimizadas
+    const searchQueries = await generateSearchQueries(params.keywords || [], params.location || '');
+    const queryParams = { ...params, keywords: searchQueries };
+    
+    // Scrape from all sources in parallel
+    const [remoteOKJobs, wwrJobs, remotiveJobs] = await Promise.all([
+      scrapeRemoteOK(queryParams),
+      scrapeWWRRSS(queryParams),
+      scrapeRemotive(queryParams)
     ]);
 
-    return [...wwrJobs, ...remotiveJobs];
+    const allJobs: Job[] = [
+      ...remoteOKJobs,
+      ...wwrJobs,
+      ...remotiveJobs
+    ];
+
+    // Remove duplicates based on title and company
+    const uniqueJobs = allJobs.filter((job, index, self) =>
+      index === self.findIndex(j =>
+        j.title.toLowerCase() === job.title.toLowerCase() &&
+        j.company.toLowerCase() === j.company.toLowerCase()
+      )
+    );
+
+    console.log(`Total unique jobs found: ${uniqueJobs.length}`);
+    
+    if (uniqueJobs.length === 0) {
+      console.log('Nenhuma vaga real encontrada para os parâmetros informados.');
+      return [];
+    }
+
+    // Ordena por data e retorna até o limite máximo
+    return uniqueJobs
+      .sort((a, b) => new Date(b.posted_at).getTime() - new Date(a.posted_at).getTime())
+      .slice(0, CONFIG.MAX_TOTAL_JOBS);
   } catch (error) {
     console.error('Error scraping jobs:', error);
     return [];

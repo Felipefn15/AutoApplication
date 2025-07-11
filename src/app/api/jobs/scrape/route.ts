@@ -26,53 +26,111 @@ export interface JobData {
 /**
  * Gera palavras-chave e localização a partir do currículo usando LLM
  */
-async function extractKeywordsAndLocation(resumeData: ResumeData): Promise<{ keywords: string[], location: string }> {
+async function extractKeywordsAndLocation(resumeData: ResumeData): Promise<{ keywords: string[], roles: string[], location: string }> {
+  console.log('🤖 Iniciando extração de keywords com Groq...');
+  
   const prompt = `
 A partir do seguinte perfil extraído de um currículo, gere:
-- Uma lista de até 5 palavras-chave (tecnologias, cargos, áreas, skills) para busca de vagas
-- A localização principal do candidato (cidade, estado ou país)
+- Uma lista de todas as tecnologias, linguagens, frameworks, bancos de dados, ferramentas e skills encontradas (tanto no início quanto em cada experiência)
+- Uma lista de cargos/roles encontrados
+- A localização principal do candidato (cidade, estado ou país). Se não encontrar, use "Brasil" ou "Latam".
 
 Retorne no formato JSON:
 {
-  "keywords": ["palavra1", "palavra2", ...],
-  "location": "cidade ou país"
+  "keywords": ["React", "Node.js", "TypeScript", ...],
+  "roles": ["Full Stack Developer", "Front End Developer", ...],
+  "location": "Brasil"
 }
 
-Perfil:
+Perfil detalhado:
 Nome: ${resumeData.name}
 Email: ${resumeData.email}
-Habilidades: ${resumeData.skills.join(', ')}
-Experiências: ${resumeData.experience.map(exp => `${exp.title} na ${exp.company}`).join('; ')}
 Localização: ${resumeData.location || 'não especificada'}
+Anos de experiência total: ${resumeData.totalYearsExperience || 0}
+Habilidades principais: ${resumeData.skills.join(', ')}
+Experiência por tecnologia: ${Object.entries(resumeData.experienceByTechnology || {}).map(([tech, years]) => `${tech} (${years} anos)`).join(', ')}
+Experiências profissionais:
+${resumeData.experience.map((exp, index) => `
+${index + 1}. ${exp.title} na ${exp.company} (${exp.duration})
+   Descrição: ${exp.description}
+   Tecnologias: ${exp.technologies?.join(', ') || 'não especificadas'}
+   Anos no cargo: ${exp.yearsInRole || 1}
+`).join('\n')}
 Resumo: ${resumeData.summary || 'não disponível'}
+Educação: ${resumeData.education.map(edu => `${edu.degree} na ${edu.institution} (${edu.year})`).join('; ')}
+Idiomas: ${resumeData.languages?.join(', ') || 'não especificados'}
+
+INSTRUÇÕES:
+1. Extraia TODAS as tecnologias mencionadas no currículo
+2. Identifique cargos/roles baseados nas experiências
+3. Use a localização do candidato ou "Brasil" como padrão
+4. Inclua tecnologias tanto das habilidades quanto das experiências
+5. Considere anos de experiência por tecnologia
+6. Retorne apenas JSON válido
 `;
 
-  const completion = await groq.chat.completions.create({
-    messages: [
-      {
-        role: 'system',
-        content: 'Você é um assistente que gera palavras-chave e localização para busca de vagas a partir de um currículo. Responda apenas com JSON.'
-      },
-      {
-        role: 'user',
-        content: prompt
-      }
-    ],
-    model: 'llama3-8b-8192',
-    temperature: 0.2,
-    max_tokens: 200,
-  });
-
-  const response = completion.choices[0]?.message?.content || '{}';
   try {
-    const parsed = JSON.parse(response);
-    return {
-      keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
-      location: typeof parsed.location === 'string' ? parsed.location : ''
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: 'system',
+          content: 'Você é um assistente especializado em extrair palavras-chave, cargos e localização de currículos para busca de vagas. Responda apenas com JSON válido.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      model: 'llama3-8b-8192',
+      temperature: 0.2,
+      max_tokens: 500,
+    });
+
+    const response = completion.choices[0]?.message?.content || '{}';
+    console.log('🤖 Resposta do Groq:', response);
+    
+    try {
+      const parsed = JSON.parse(response);
+      const result = {
+        keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
+        roles: Array.isArray(parsed.roles) ? parsed.roles : [],
+        location: typeof parsed.location === 'string' && parsed.location.trim() ? parsed.location : 'Brasil'
+      };
+      
+      console.log('✅ Keywords extraídas:', result);
+      return result;
+    } catch (e) {
+      console.warn('❌ Resposta inválida do Groq para keywords/roles/location:', response);
+      console.warn('⚠️ Usando fallback com skills do currículo');
+      
+      // Fallback: usa skills do currículo + algumas keywords baseadas nas experiências
+      const fallbackKeywords = [
+        ...resumeData.skills,
+        ...Object.keys(resumeData.experienceByTechnology || {}),
+        ...resumeData.experience.flatMap(exp => exp.technologies || [])
+      ].filter((value, index, self) => self.indexOf(value) === index); // Remove duplicatas
+      
+      return { 
+        keywords: fallbackKeywords.slice(0, 10), 
+        roles: [], 
+        location: resumeData.location || 'Brasil' 
+      };
+    }
+  } catch (error) {
+    console.error('❌ Erro ao chamar Groq:', error);
+    
+    // Fallback em caso de erro
+    const fallbackKeywords = [
+      ...resumeData.skills,
+      ...Object.keys(resumeData.experienceByTechnology || {}),
+      ...resumeData.experience.flatMap(exp => exp.technologies || [])
+    ].filter((value, index, self) => self.indexOf(value) === index);
+    
+    return { 
+      keywords: fallbackKeywords.slice(0, 10), 
+      roles: [], 
+      location: resumeData.location || 'Brasil' 
     };
-  } catch (e) {
-    console.warn('Resposta inválida do Groq para keywords/location:', response);
-    return { keywords: resumeData.skills.slice(0, 5), location: resumeData.location || '' };
   }
 }
 
@@ -92,6 +150,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    console.log('📄 Arquivo recebido:', {
+      name: resumeFile.name,
+      type: resumeFile.type,
+      size: resumeFile.size,
+      lastModified: resumeFile.lastModified
+    });
+
     if (resumeFile.size > 5 * 1024 * 1024) {
       return NextResponse.json(
         { error: 'Arquivo muito grande. Máximo 5MB permitido.' },
@@ -99,46 +164,76 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const allowedTypes = [
-      'application/pdf',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    ];
-    if (!allowedTypes.includes(resumeFile.type)) {
+    // Aceita qualquer arquivo com extensão válida, independentemente do tipo MIME
+    const validExtensions = ['.pdf', '.docx', '.doc'];
+    const fileName = resumeFile.name.toLowerCase();
+    const hasValidExtension = validExtensions.some(ext => fileName.endsWith(ext));
+    
+    if (!hasValidExtension) {
+      console.log('❌ Extensão de arquivo não suportada:', resumeFile.name);
       return NextResponse.json(
-        { error: 'Formato não suportado. Use PDF ou DOCX.' },
+        { error: `Formato não suportado: ${resumeFile.name}. Use PDF, DOCX ou DOC.` },
         { status: 400 }
       );
     }
 
+    console.log('✅ Arquivo validado, iniciando processamento...');
+
     // 1. Parse do currículo
+    console.log('📄 Iniciando parse do currículo...');
     const resumeData = await parseResume(resumeFile);
+    
+    // Log detalhado dos dados extraídos
+    console.log('📄 Dados completos do currículo extraídos:', {
+      name: resumeData.name,
+      email: resumeData.email,
+      totalYearsExperience: resumeData.totalYearsExperience,
+      skills: resumeData.skills,
+      experience: resumeData.experience?.map(exp => ({
+        title: exp.title,
+        company: exp.company,
+        duration: exp.duration,
+        yearsInRole: exp.yearsInRole,
+        technologies: exp.technologies
+      })) || [],
+      experienceByTechnology: resumeData.experienceByTechnology
+    });
+    
     // 2. Gerar palavras-chave e localização
-    const { keywords, location } = await extractKeywordsAndLocation(resumeData);
-    console.log('Palavras-chave extraídas:', keywords, 'Localização:', location);
+    console.log('🔍 Iniciando extração de keywords com Groq...');
+    const { keywords, roles, location } = await extractKeywordsAndLocation(resumeData);
+    const searchKeywords = [...keywords, ...roles].filter(Boolean);
+    console.log('Palavras-chave extraídas:', searchKeywords, 'Localização:', location);
 
     // 3. Buscar vagas já filtradas
-    const scrapedJobs = await scrapeJobs({ keywords, location });
-    console.log(`Encontradas ${scrapedJobs.length} vagas para keywords:`, keywords, 'e localização:', location);
+    console.log('🔍 Iniciando busca de vagas...');
+    const scrapedJobs = await scrapeJobs({ keywords: searchKeywords, location });
+    console.log(`Encontradas ${scrapedJobs.length} vagas para keywords:`, searchKeywords, 'e localização:', location);
+
+    if (!scrapedJobs || scrapedJobs.length === 0) {
+      return NextResponse.json({
+        success: false,
+        jobs: [],
+        message: 'Nenhuma vaga encontrada. Tente outras palavras-chave ou aguarde alguns minutos.'
+      });
+    }
 
     // 4. (Opcional) Filtrar/classificar com LLM
     // const relevantJobs = await filterRelevantJobs(scrapedJobs, resumeData);
     // console.log(`${relevantJobs.length} vagas relevantes encontradas`);
 
+    console.log('✅ Processamento concluído com sucesso');
     return NextResponse.json({
       success: true,
       jobs: scrapedJobs,
-      resumeData: {
-        name: resumeData.name,
-        email: resumeData.email,
-        skills: resumeData.skills,
-        experience: resumeData.experience
-      },
+      resumeData,
       keywords,
+      roles,
       location
     });
 
   } catch (error) {
-    console.error('Erro na busca de vagas:', error);
+    console.error('❌ Erro na busca de vagas:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Erro interno do servidor' },
       { status: 500 }
